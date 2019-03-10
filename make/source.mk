@@ -11,7 +11,7 @@ COMMON_SRC = \
             common/encoding.c \
             common/filter.c \
             common/logic_condition.h \
-            common/global_functions.h \
+            common/global_functions.c \
             common/maths.c \
             common/calibration.c \
             common/memory.c \
