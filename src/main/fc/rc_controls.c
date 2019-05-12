@@ -168,6 +168,10 @@ void processRcStickPositions(throttleStatus_e throttleStatus)
 
     updateRcStickPositions();
 
+    if (BLACKBOX_MODE_ALWAYS_ON) {
+        startBlackbox();
+    }
+
     uint32_t stTmp = getRcStickPositions();
     if (stTmp == rcSticks) {
         if (rcDelayCommand < 250) {
