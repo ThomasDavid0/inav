@@ -31,6 +31,8 @@ tables:
     enum: rx_spi_protocol_e
   - name: blackbox_device
     values: ["SERIAL", "SPIFLASH", "SDCARD"]
+  - name: blackbox_mode
+    values: ["NORMAL", "ALWAYS"]
   - name: motor_pwm_protocol
     values: ["STANDARD", "ONESHOT125", "ONESHOT42", "MULTISHOT", "BRUSHED", "DSHOT150", "DSHOT300", "DSHOT600", "DSHOT1200"]
   - name: failsafe_procedure
@@ -415,7 +417,10 @@ groups:
         field: invertedCardDetection
         condition: USE_SDCARD
         type: bool
-
+      - name: blackbox_mode
+        field: mode
+        table: blackbox_mode
+        
   - name: PG_MOTOR_CONFIG
     type: motorConfig_t
     headers: ["flight/mixer.h"]

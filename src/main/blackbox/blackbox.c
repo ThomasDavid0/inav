@@ -100,6 +100,7 @@ PG_RESET_TEMPLATE(blackboxConfig_t, blackboxConfig,
     .rate_num = 1,
     .rate_denom = 1,
     .invertedCardDetection = BLACKBOX_INTERVED_CARD_DETECTION,
+    .mode = BLACKBOX_MODE_ALWAYS_ON
 );
 
 #define BLACKBOX_SHUTDOWN_TIMEOUT_MILLIS 200

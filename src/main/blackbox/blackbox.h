@@ -21,11 +21,18 @@
 
 #include "config/parameter_group.h"
 
+typedef enum BlackboxMode {
+    BLACKBOX_MODE_NORMAL = 0,
+    BLACKBOX_MODE_ALWAYS_ON
+} BlackboxMode;
+
+
 typedef struct blackboxConfig_s {
     uint16_t rate_num;
     uint16_t rate_denom;
     uint8_t device;
     uint8_t invertedCardDetection;
+    uint8_t mode;
 } blackboxConfig_t;
 
 PG_DECLARE(blackboxConfig_t, blackboxConfig);

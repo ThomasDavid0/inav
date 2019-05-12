@@ -162,6 +162,10 @@ void processRcStickPositions(throttleStatus_e throttleStatus)
     static timeMs_t rcDisarmTimeMs;     // this is an extra guard for disarming through switch to prevent that one frame can disarm it
     const timeMs_t currentTimeMs = millis();
 
+    if (BLACKBOX_MODE_ALWAYS_ON) {
+        startBlackbox();
+    }
+
     updateRcStickPositions();
 
     uint32_t stTmp = getRcStickPositions();

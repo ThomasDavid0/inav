@@ -344,7 +344,9 @@ void disarm(disarmReason_t disarmReason)
 
 #ifdef USE_BLACKBOX
         if (feature(FEATURE_BLACKBOX)) {
-            blackboxFinish();
+            if (feature(FEATURE_BLACKBOX && !BLACKBOX_MODE_ALWAYS_ON)) {
+                blackboxFinish();
+            }
         }
 #endif
 
@@ -369,6 +371,20 @@ void releaseSharedTelemetryPorts(void) {
     }
 }
 
+void startBlackbox(void)
+{
+
+#ifdef USE_BLACKBOX
+        if (feature(FEATURE_BLACKBOX)) {
+            serialPort_t *sharedBlackboxAndMspPort = findSharedSerialPort(FUNCTION_BLACKBOX, FUNCTION_MSP);
+            if (sharedBlackboxAndMspPort) {
+                mspSerialReleasePortIfAllocated(sharedBlackboxAndMspPort);
+            }
+            blackboxStart();
+        }
+#endif
+}
+
 void tryArm(void)
 {
     updateArmingStatus();
@@ -386,15 +402,8 @@ void tryArm(void)
 
         resetHeadingHoldTarget(DECIDEGREES_TO_DEGREES(attitude.values.yaw));
 
-#ifdef USE_BLACKBOX
-        if (feature(FEATURE_BLACKBOX)) {
-            serialPort_t *sharedBlackboxAndMspPort = findSharedSerialPort(FUNCTION_BLACKBOX, FUNCTION_MSP);
-            if (sharedBlackboxAndMspPort) {
-                mspSerialReleasePortIfAllocated(sharedBlackboxAndMspPort);
-            }
-            blackboxStart();
-        }
-#endif
+        startBlackbox();
+        
         disarmAt = millis() + armingConfig()->auto_disarm_delay * 1000;   // start disarm timeout, will be extended when throttle is nonzero
 
         //beep to indicate arming
