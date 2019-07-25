@@ -172,32 +172,12 @@ static void updateArmingStatus(void)
             }
         }
 
-        /* CHECK: RX signal */
-        if (!failsafeIsReceivingRxData()) {
-            ENABLE_ARMING_FLAG(ARMING_DISABLED_RC_LINK);
-        }
-        else {
-            DISABLE_ARMING_FLAG(ARMING_DISABLED_RC_LINK);
-        }
 
-        /* CHECK: Throttle */
-        if (!armingConfig()->fixed_wing_auto_arm) {
-            // Don't want this check if fixed_wing_auto_arm is in use - machine arms on throttle > LOW
-            if (calculateThrottleStatus() != THROTTLE_LOW) {
-                ENABLE_ARMING_FLAG(ARMING_DISABLED_THROTTLE);
-            } else {
-                DISABLE_ARMING_FLAG(ARMING_DISABLED_THROTTLE);
-            }
-        }
-
-	/* CHECK: pitch / roll sticks centered when NAV_LAUNCH_MODE enabled */
-	if (isNavLaunchEnabled()) {
-	  if (areSticksDeflectedMoreThanPosHoldDeadband()) {
-	    ENABLE_ARMING_FLAG(ARMING_DISABLED_ROLLPITCH_NOT_CENTERED);
-	  } else {
-	    DISABLE_ARMING_FLAG(ARMING_DISABLED_ROLLPITCH_NOT_CENTERED);
-	  }
-	}
+        DISABLE_ARMING_FLAG(ARMING_DISABLED_RC_LINK);
+        DISABLE_ARMING_FLAG(ARMING_DISABLED_THROTTLE);
+        DISABLE_ARMING_FLAG(ARMING_DISABLED_ROLLPITCH_NOT_CENTERED);
+	//  }
+	//}
 
         /* CHECK: Angle */
         if (!STATE(SMALL_ANGLE)) {
@@ -216,13 +196,7 @@ static void updateArmingStatus(void)
         }
 
 #if defined(USE_NAV)
-        /* CHECK: Navigation safety */
-        if (navigationBlockArming()) {
-            ENABLE_ARMING_FLAG(ARMING_DISABLED_NAVIGATION_UNSAFE);
-        }
-        else {
-            DISABLE_ARMING_FLAG(ARMING_DISABLED_NAVIGATION_UNSAFE);
-        }
+        DISABLE_ARMING_FLAG(ARMING_DISABLED_NAVIGATION_UNSAFE);
 #endif
 
 #if defined(USE_MAG)
@@ -252,41 +226,17 @@ static void updateArmingStatus(void)
         }
 
         /* CHECK: Arming switch */
-        if (!isUsingSticksForArming()) {
-            // If arming is disabled and the ARM switch is on
-            if (isArmingDisabled() && IS_RC_MODE_ACTIVE(BOXARM)) {
-                ENABLE_ARMING_FLAG(ARMING_DISABLED_ARM_SWITCH);
-            } else if (!IS_RC_MODE_ACTIVE(BOXARM)) {
-                DISABLE_ARMING_FLAG(ARMING_DISABLED_ARM_SWITCH);
-            }
-        }
-
-        /* CHECK: BOXFAILSAFE */
-        if (IS_RC_MODE_ACTIVE(BOXFAILSAFE)) {
-            ENABLE_ARMING_FLAG(ARMING_DISABLED_BOXFAILSAFE);
-        }
-        else {
-            DISABLE_ARMING_FLAG(ARMING_DISABLED_BOXFAILSAFE);
-        }
-
-        /* CHECK: BOXFAILSAFE */
-        if (IS_RC_MODE_ACTIVE(BOXKILLSWITCH)) {
-            ENABLE_ARMING_FLAG(ARMING_DISABLED_BOXKILLSWITCH);
-        }
-        else {
-            DISABLE_ARMING_FLAG(ARMING_DISABLED_BOXKILLSWITCH);
-        }
-        /* CHECK: Do not allow arming if Servo AutoTrim is enabled */
-        if (IS_RC_MODE_ACTIVE(BOXAUTOTRIM)) {
-	    ENABLE_ARMING_FLAG(ARMING_DISABLED_SERVO_AUTOTRIM);
-	    }
-        else {
+        DISABLE_ARMING_FLAG(ARMING_DISABLED_ARM_SWITCH);
+        DISABLE_ARMING_FLAG(ARMING_DISABLED_BOXFAILSAFE);
+        DISABLE_ARMING_FLAG(ARMING_DISABLED_BOXKILLSWITCH);
 	    DISABLE_ARMING_FLAG(ARMING_DISABLED_SERVO_AUTOTRIM);
-	    }
-
+	    
         if (isArmingDisabled()) {
+            //LED0_TOGGLE;
             warningLedFlash();
+            //warningLedEnable();
         } else {
+            //LED0_ON;
             warningLedDisable();
         }
 
@@ -336,22 +286,8 @@ void annexCode(void)
     updateArmingStatus();
 }
 
-void disarm(disarmReason_t disarmReason)
-{
-    if (ARMING_FLAG(ARMED)) {
-        lastDisarmReason = disarmReason;
-        DISABLE_ARMING_FLAG(ARMED);
-
-#ifdef USE_BLACKBOX
-        if (feature(FEATURE_BLACKBOX && !BLACKBOX_MODE_ALWAYS_ON)) {
-            blackboxFinish();
-        }
-#endif
-
-        statsOnDisarm();
-
-        beeper(BEEPER_DISARMING);      // emit disarm tone
-    }
+void disarm(disarmReason_t disarmReason) {
+    // dont want to do this any more
 }
 
 disarmReason_t getDisarmReason(void) {
@@ -387,7 +323,6 @@ void tryArm(void) {
         if (ARMING_FLAG(ARMED)) {
             return;
         }
-
         lastDisarmReason = DISARM_NONE;
 
         ENABLE_ARMING_FLAG(ARMED);
@@ -425,12 +360,6 @@ void processRx(timeUs_t currentTimeUs)
     // Calculate RPY channel data
     calculateRxChannelsAndUpdateFailsafe(currentTimeUs);
 
-    // in 3D mode, we need to be able to disarm by switch at any time
-    if (feature(FEATURE_3D)) {
-        if (!IS_RC_MODE_ACTIVE(BOXARM))
-            disarm(DISARM_SWITCH_3D);
-    }
-
     updateRSSI(currentTimeUs);
 
     // Update failsafe monitoring system
@@ -441,51 +370,7 @@ void processRx(timeUs_t currentTimeUs)
     failsafeUpdateState();
 
     const throttleStatus_e throttleStatus = calculateThrottleStatus();
-
-    // When armed and motors aren't spinning, do beeps and then disarm
-    // board after delay so users without buzzer won't lose fingers.
-    // mixTable constrains motor commands, so checking  throttleStatus is enough
-    if (ARMING_FLAG(ARMED)
-        && feature(FEATURE_MOTOR_STOP)
-        && !STATE(FIXED_WING)
-    ) {
-        if (isUsingSticksForArming()) {
-            if (throttleStatus == THROTTLE_LOW) {
-                if (armingConfig()->auto_disarm_delay != 0
-                    && (int32_t)(disarmAt - millis()) < 0
-                ) {
-                    // auto-disarm configured and delay is over
-                    disarm(DISARM_TIMEOUT);
-                    armedBeeperOn = false;
-                } else {
-                    // still armed; do warning beeps while armed
-                    beeper(BEEPER_ARMED);
-                    armedBeeperOn = true;
-                }
-            } else {
-                // throttle is not low
-                if (armingConfig()->auto_disarm_delay != 0) {
-                    // extend disarm time
-                    disarmAt = millis() + armingConfig()->auto_disarm_delay * 1000;
-                }
-
-                if (armedBeeperOn) {
-                    beeperSilence();
-                    armedBeeperOn = false;
-                }
-            }
-        } else {
-            // arming is via AUX switch; beep while throttle low
-            if (throttleStatus == THROTTLE_LOW) {
-                beeper(BEEPER_ARMED);
-                armedBeeperOn = true;
-            } else if (armedBeeperOn) {
-                beeperSilence();
-                armedBeeperOn = false;
-            }
-        }
-    }
-
+        
     processRcStickPositions(throttleStatus);
 
     updateActivatedModes();
@@ -679,8 +564,12 @@ void taskMainPidLoop(timeUs_t currentTimeUs)
     cycleTime = getTaskDeltaTime(TASK_SELF);
     dT = (float)cycleTime * 0.000001f;
 
-    if (ARMING_FLAG(ARMED) && (!STATE(FIXED_WING) || !isNavLaunchEnabled() || (isNavLaunchEnabled() && (isFixedWingLaunchDetected() || isFixedWingLaunchFinishedOrAborted())))) {
-        flightTime += cycleTime;
+    if (ARMING_FLAG(ARMED)) {
+        flightTime  += cycleTime;
+    } else {
+        if (!cliMode && STATE(GPS_FIX)) {
+            tryArm();
+        }
     }
 
     taskGyro(currentTimeUs);

@@ -212,6 +212,7 @@ void schedulerInit(void)
     queueAdd(&cfTasks[TASK_SYSTEM]);
 }
 
+
 void scheduler(void)
 {
     // Cache currentTime

@@ -410,16 +410,16 @@ void gpsEnablePassthrough(serialPort_t *gpsPassthroughPort)
     char c;
     while (1) {
         if (serialRxBytesWaiting(gpsState.gpsPort)) {
-            LED0_ON;
+            //LED0_ON;
             c = serialRead(gpsState.gpsPort);
             serialWrite(gpsPassthroughPort, c);
-            LED0_OFF;
+            //LED0_OFF;
         }
         if (serialRxBytesWaiting(gpsPassthroughPort)) {
-            LED1_ON;
+            //LED1_ON;
             c = serialRead(gpsPassthroughPort);
             serialWrite(gpsState.gpsPort, c);
-            LED1_OFF;
+            //LED1_OFF;
         }
     }
 }
