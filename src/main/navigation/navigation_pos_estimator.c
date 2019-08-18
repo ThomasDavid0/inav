@@ -383,7 +383,7 @@ static void updateIMUTopic(void)
         posEstimator.imu.accelNEU.z = accelBF.z;
 
         /* When unarmed, assume that accelerometer should measure 1G. Use that to correct accelerometer gain */
-        if (/*!ARMING_FLAG(ARMED) && */!gravityCalibrationComplete()) {
+        if (!ARMING_FLAG(ARMED) && !gravityCalibrationComplete()) {
             zeroCalibrationAddValueS(&posEstimator.imu.gravityCalibration, posEstimator.imu.accelNEU.z);
 
             if (gravityCalibrationComplete()) {

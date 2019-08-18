@@ -287,7 +287,21 @@ void annexCode(void)
 }
 
 void disarm(disarmReason_t disarmReason) {
-    // dont want to do this any more
+    if (ARMING_FLAG(ARMED)) {	
+        lastDisarmReason = disarmReason;	
+        DISABLE_ARMING_FLAG(ARMED);	
+
+ #ifdef USE_BLACKBOX	
+        if (feature(FEATURE_BLACKBOX && !BLACKBOX_MODE_ALWAYS_ON)) {	
+            blackboxFinish();	
+        }	
+#endif	
+
+         statsOnDisarm();	
+
+         beeper(BEEPER_DISARMING);      // emit disarm tone	
+    }
+
 }
 
 disarmReason_t getDisarmReason(void) {

@@ -179,14 +179,34 @@ void processRcStickPositions(throttleStatus_e throttleStatus)
     // perform actions
     if (!isUsingSticksForArming()) {
         if (STATE(GPS_FIX)) {
-            rcDisarmTimeMs = currentTimeMs;
-            tryArm();
+            //rcDisarmTimeMs = currentTimeMs;
+            //tryArm();
         }
     }
-
+ // KILLSWITCH disarms instantly	
+    if (IS_RC_MODE_ACTIVE(BOXKILLSWITCH)) {	
+        disarm(DISARM_KILLSWITCH);	
+    }
     if (rcDelayCommand != 20) {
         return;
     }
+
+   if (isUsingSticksForArming()) {	
+        // Disarm on throttle down + yaw	
+        if (rcSticks == THR_LO + YAW_LO + PIT_CE + ROL_CE) {	
+            // Dont disarm if fixedwing and motorstop	
+            if (STATE(FIXED_WING) && feature(FEATURE_MOTOR_STOP) && armingConfig()->fixed_wing_auto_arm) {	
+                return;	
+            }	
+            else if (ARMING_FLAG(ARMED)) {	
+                disarm(DISARM_STICKS);	
+            }	
+            else {	
+                beeper(BEEPER_DISARM_REPEAT);    // sound tone while stick held	
+                rcDelayCommand = 0;              // reset so disarm tone will repeat	
+            }	
+        }	
+   }
 
     if (ARMING_FLAG(ARMED)) {
         // actions during armed
@@ -261,7 +281,7 @@ void processRcStickPositions(throttleStatus_e throttleStatus)
     // Arming by sticks
     if (isUsingSticksForArming()) {
         if (STATE(GPS_FIX)) {
-            tryArm();
+            //tryArm();
             return;
         }
     }
