@@ -291,7 +291,7 @@ static void imuMahonyAHRSupdate(float dt, const fpVector3_t * gyroBF, const fpVe
     /* Calculate general spin rate (rad/s) */
     const float spin_rate_sq = vectorNormSquared(&vRotation);
 
-    /* Step 1: Yaw correction */
+    /* Step 1: magnetometer correction */
     // Use measured magnetic field vector
     if (magBF || useCOG) {
         static const fpVector3_t vForward = { .v = { 1.0f, 0.0f, 0.0f } };
@@ -309,7 +309,7 @@ static void imuMahonyAHRSupdate(float dt, const fpVector3_t * gyroBF, const fpVe
             quaternionRotateVectorInv(&vMag, magBF, &orientation);    // BF -> EF
 
             // Ignore magnetic inclination
-            vMag.z = 0.0f;
+            //vMag.z = 0.0f;
 
             // We zeroed out vMag.z -  make sure the whole vector didn't go to zero
             if (vectorNormSquared(&vMag) > 0.01f) {
@@ -340,7 +340,7 @@ static void imuMahonyAHRSupdate(float dt, const fpVector3_t * gyroBF, const fpVe
 
             // Rotate Forward vector from BF to EF - will yield Heading vector in Earth frame
             quaternionRotateVectorInv(&vHeadingEF, &vForward, &orientation);
-            vHeadingEF.z = 0.0f;
+            //vHeadingEF.z = 0.0f;
 
             // We zeroed out vHeadingEF.z -  make sure the whole vector didn't go to zero
             if (vectorNormSquared(&vHeadingEF) > 0.01f) {
