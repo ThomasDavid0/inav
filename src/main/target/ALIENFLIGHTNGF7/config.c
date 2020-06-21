@@ -24,6 +24,7 @@
 
 #include "drivers/sensor.h"
 #include "drivers/pwm_esc_detect.h"
+#include "drivers/pwm_mapping.h"
 #include "drivers/pwm_output.h"
 #include "drivers/serial.h"
 
@@ -63,7 +64,6 @@ void targetConfiguration(void)
 
     if (hardwareMotorType == MOTOR_BRUSHED) {
         motorConfigMutable()->motorPwmRate = BRUSHED_MOTORS_PWM_RATE;
-        motorConfigMutable()->minthrottle = 1000;
     }
 
     if (hardwareRevision == AFF7_REV_1) {

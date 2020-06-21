@@ -696,30 +696,29 @@ $(OBJECT_DIR)/rcdevice_unittest : \
 	$(OBJECT_DIR)/io/rcdevice.o \
 	$(OBJECT_DIR)/io/rcdevice_cam.o \
 	$(OBJECT_DIR)/fc/rc_modes.o \
-	$(OBJECT_DIR)/rx/rx.o \
 	$(OBJECT_DIR)/common/maths.o \
 	$(OBJECT_DIR)/gtest_main.a 
 
 	$(CXX) $(CXX_FLAGS) $^ -o $(OBJECT_DIR)/$@
 
-$(OBJECT_DIR)/drivers/system.o : \
-	$(USER_DIR)/drivers/system.c \
-	$(USER_DIR)/drivers/system.h \
+$(OBJECT_DIR)/drivers/time.o : \
+	$(USER_DIR)/drivers/time.c \
+	$(USER_DIR)/drivers/time.h \
 	$(GTEST_HEADERS)
 
 	@mkdir -p $(dir $@)
-	$(CC) $(C_FLAGS) $(TEST_CFLAGS) -c $(USER_DIR)/drivers/system.c -o $@
+	$(CC) $(C_FLAGS) $(TEST_CFLAGS) -c $(USER_DIR)/drivers/time.c -o $@
 
 $(OBJECT_DIR)/time_unittest.o : \
 	$(TEST_DIR)/time_unittest.cc \
-	$(USER_DIR)/drivers/system.h \
+	$(USER_DIR)/drivers/time.h \
 	$(GTEST_HEADERS)
 
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXX_FLAGS) $(TEST_CFLAGS) -c $(TEST_DIR)/time_unittest.cc -o $@
 
 $(OBJECT_DIR)/time_unittest : \
-	$(OBJECT_DIR)/drivers/system.o \
+	$(OBJECT_DIR)/drivers/time.o \
 	$(OBJECT_DIR)/time_unittest.o \
 	$(OBJECT_DIR)/gtest_main.a
 
