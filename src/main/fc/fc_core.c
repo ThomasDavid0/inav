@@ -21,6 +21,8 @@
 
 #include "platform.h"
 
+FILE_COMPILE_FOR_SPEED
+
 #include "blackbox/blackbox.h"
 
 #include "build/debug.h"
@@ -30,6 +32,7 @@
 #include "common/color.h"
 #include "common/utils.h"
 #include "common/filter.h"
+#include "common/global_functions.h"
 
 #include "drivers/light_led.h"
 #include "drivers/serial.h"
@@ -47,6 +50,7 @@
 #include "sensors/battery.h"
 #include "sensors/rangefinder.h"
 #include "sensors/opflow.h"
+#include "sensors/esc_sensor.h"
 
 #include "fc/fc_core.h"
 #include "fc/cli.h"
@@ -95,21 +99,37 @@ enum {
     ALIGN_MAG = 2
 };
 
-#define GYRO_WATCHDOG_DELAY 100  // Watchdog for boards without interrupt for gyro
+#define GYRO_WATCHDOG_DELAY                 100 // Watchdog for boards without interrupt for gyro
+#define GYRO_SYNC_MAX_CONSECUTIVE_FAILURES  100 // After this many consecutive missed interrupts disable gyro sync and fall back to scheduled updates
+
+#define EMERGENCY_ARMING_TIME_WINDOW_MS 10000
+#define EMERGENCY_ARMING_COUNTER_STEP_MS 100
+
+typedef struct emergencyArmingState_s {
+    bool armingSwitchWasOn;
+    // Each entry in the queue is an offset from start,
+    // in 0.1s increments. This lets us represent up to 25.5s
+    // so it will work fine as long as the window for the triggers
+    // is smaller (see EMERGENCY_ARMING_TIME_WINDOW_MS). First
+    // entry of the queue is implicit.
+    timeMs_t start;
+    uint8_t queue[9];
+    uint8_t queueCount;
+} emergencyArmingState_t;
 
 timeDelta_t cycleTime = 0;         // this is the number in micro second to achieve a full loop, it can differ a little and is taken into account in the PID loop
 static timeUs_t flightTime = 0;
 
-float dT;
+EXTENDED_FASTRAM float dT;
 
 int16_t headFreeModeHold;
 
 uint8_t motorControlEnable = false;
 
-static uint32_t disarmAt;     // Time of automatic disarm when "Don't spin the motors when armed" is enabled and auto_disarm_delay is nonzero
-
 static bool isRXDataNew;
+static uint32_t gyroSyncFailureCount;
 static disarmReason_t lastDisarmReason = DISARM_NONE;
+static emergencyArmingState_t emergencyArming;
 
 bool isCalibrating(void)
 {
@@ -196,7 +216,13 @@ static void updateArmingStatus(void)
         }
 
 #if defined(USE_NAV)
-        DISABLE_ARMING_FLAG(ARMING_DISABLED_NAVIGATION_UNSAFE);
+        /* CHECK: Navigation safety */
+        if (navigationIsBlockingArming(NULL) != NAV_ARMING_BLOCKER_NONE) {
+            ENABLE_ARMING_FLAG(ARMING_DISABLED_NAVIGATION_UNSAFE);
+        }
+        else {
+            DISABLE_ARMING_FLAG(ARMING_DISABLED_NAVIGATION_UNSAFE);
+        }
 #endif
 
 #if defined(USE_MAG)
@@ -225,16 +251,16 @@ static void updateArmingStatus(void)
             DISABLE_ARMING_FLAG(ARMING_DISABLED_HARDWARE_FAILURE);
         }
 
+<<<<<<< HEAD
         /* CHECK: Arming switch */
         DISABLE_ARMING_FLAG(ARMING_DISABLED_ARM_SWITCH);
         DISABLE_ARMING_FLAG(ARMING_DISABLED_BOXFAILSAFE);
-        DISABLE_ARMING_FLAG(ARMING_DISABLED_BOXKILLSWITCH);
 	    DISABLE_ARMING_FLAG(ARMING_DISABLED_SERVO_AUTOTRIM);
 	    
-        if (isArmingDisabled()) {
-            //LED0_TOGGLE;
-            warningLedFlash();
-            //warningLedEnable();
+=======
+        /* CHECK: BOXFAILSAFE */
+        if (IS_RC_MODE_ACTIVE(BOXFAILSAFE)) {
+            ENABLE_ARMING_FLAG(ARMING_DISABLED_BOXFAILSAFE);
         } else {
             //LED0_ON;
             warningLedDisable();
@@ -242,6 +268,26 @@ static void updateArmingStatus(void)
 
         warningLedUpdate();
     }
+}
+
+static bool emergencyArmingIsTriggered(void)
+{
+    int threshold = (EMERGENCY_ARMING_TIME_WINDOW_MS / EMERGENCY_ARMING_COUNTER_STEP_MS);
+    return emergencyArming.queueCount == ARRAYLEN(emergencyArming.queue) + 1 &&
+        emergencyArming.queue[ARRAYLEN(emergencyArming.queue) - 1] < threshold &&
+        emergencyArming.start >= millis() - EMERGENCY_ARMING_TIME_WINDOW_MS;
+}
+
+static bool emergencyArmingCanOverrideArmingDisabled(void)
+{
+    uint32_t armingPrevention = armingFlags & ARMING_DISABLED_ALL_FLAGS;
+    armingPrevention &= ~ARMING_DISABLED_EMERGENCY_OVERRIDE;
+    return armingPrevention == 0;
+}
+
+static bool emergencyArmingIsEnabled(void)
+{
+    return emergencyArmingIsTriggered() && emergencyArmingCanOverrideArmingDisabled();
 }
 
 void annexCode(void)
@@ -254,9 +300,9 @@ void annexCode(void)
     }
     else {
         // Compute ROLL PITCH and YAW command
-        rcCommand[ROLL] = getAxisRcCommand(rcData[ROLL], FLIGHT_MODE(MANUAL_MODE) ? currentControlRateProfile->manual.rcExpo8 : currentControlRateProfile->stabilized.rcExpo8, rcControlsConfig()->deadband);
-        rcCommand[PITCH] = getAxisRcCommand(rcData[PITCH], FLIGHT_MODE(MANUAL_MODE) ? currentControlRateProfile->manual.rcExpo8 : currentControlRateProfile->stabilized.rcExpo8, rcControlsConfig()->deadband);
-        rcCommand[YAW] = -getAxisRcCommand(rcData[YAW], FLIGHT_MODE(MANUAL_MODE) ? currentControlRateProfile->manual.rcYawExpo8 : currentControlRateProfile->stabilized.rcYawExpo8, rcControlsConfig()->yaw_deadband);
+        rcCommand[ROLL] = getAxisRcCommand(rxGetChannelValue(ROLL), FLIGHT_MODE(MANUAL_MODE) ? currentControlRateProfile->manual.rcExpo8 : currentControlRateProfile->stabilized.rcExpo8, rcControlsConfig()->deadband);
+        rcCommand[PITCH] = getAxisRcCommand(rxGetChannelValue(PITCH), FLIGHT_MODE(MANUAL_MODE) ? currentControlRateProfile->manual.rcExpo8 : currentControlRateProfile->stabilized.rcExpo8, rcControlsConfig()->deadband);
+        rcCommand[YAW] = -getAxisRcCommand(rxGetChannelValue(YAW), FLIGHT_MODE(MANUAL_MODE) ? currentControlRateProfile->manual.rcYawExpo8 : currentControlRateProfile->stabilized.rcYawExpo8, rcControlsConfig()->yaw_deadband);
 
         // Apply manual control rates
         if (FLIGHT_MODE(MANUAL_MODE)) {
@@ -266,7 +312,7 @@ void annexCode(void)
         }
 
         //Compute THROTTLE command
-        throttleValue = constrain(rcData[THROTTLE], rxConfig()->mincheck, PWM_RANGE_MAX);
+        throttleValue = constrain(rxGetChannelValue(THROTTLE), rxConfig()->mincheck, PWM_RANGE_MAX);
         throttleValue = (uint32_t)(throttleValue - rxConfig()->mincheck) * PWM_RANGE_MIN / (PWM_RANGE_MAX - rxConfig()->mincheck);       // [MINCHECK;2000] -> [0;1000]
         rcCommand[THROTTLE] = rcLookupThrottle(throttleValue);
 
@@ -297,15 +343,54 @@ void disarm(disarmReason_t disarmReason) {
         }	
 #endif	
 
+<<<<<<< HEAD
          statsOnDisarm();	
 
          beeper(BEEPER_DISARMING);      // emit disarm tone	
+=======
+        statsOnDisarm();
+        logicConditionReset();
+        beeper(BEEPER_DISARMING);      // emit disarm tone
+>>>>>>> master
     }
 
 }
 
 disarmReason_t getDisarmReason(void) {
     return lastDisarmReason;
+}
+
+void emergencyArmingUpdate(bool armingSwitchIsOn)
+{
+    if (armingSwitchIsOn == emergencyArming.armingSwitchWasOn) {
+        return;
+    }
+    if (armingSwitchIsOn) {
+        timeMs_t now = millis();
+        if (emergencyArming.queueCount == 0) {
+            emergencyArming.queueCount = 1;
+            emergencyArming.start = now;
+        } else {
+            while (emergencyArming.start < now - EMERGENCY_ARMING_TIME_WINDOW_MS || emergencyArmingIsTriggered()) {
+                if (emergencyArming.queueCount > 1) {
+                    uint8_t delta = emergencyArming.queue[0];
+                    emergencyArming.start += delta * EMERGENCY_ARMING_COUNTER_STEP_MS;
+                    for (int ii = 0; ii < emergencyArming.queueCount - 2; ii++) {
+                        emergencyArming.queue[ii] = emergencyArming.queue[ii + 1] - delta;
+                    }
+                    emergencyArming.queueCount--;
+                } else {
+                    emergencyArming.start = now;
+                }
+            }
+            uint8_t delta = (now - emergencyArming.start) / EMERGENCY_ARMING_COUNTER_STEP_MS;
+            if (delta > 0) {
+                emergencyArming.queue[emergencyArming.queueCount - 1] = delta;
+                emergencyArming.queueCount++;
+            }
+        }
+    }
+    emergencyArming.armingSwitchWasOn = !emergencyArming.armingSwitchWasOn;
 }
 
 #define TELEMETRY_FUNCTION_MASK (FUNCTION_TELEMETRY_FRSKY | FUNCTION_TELEMETRY_HOTT | FUNCTION_TELEMETRY_SMARTPORT | FUNCTION_TELEMETRY_LTM | FUNCTION_TELEMETRY_MAVLINK | FUNCTION_TELEMETRY_IBUS)
@@ -332,21 +417,62 @@ void startBlackbox(void) {
 
 void tryArm(void) {
     updateArmingStatus();
-
-    if (!isArmingDisabled()) {
+#ifdef USE_GLOBAL_FUNCTIONS
+    if (
+        !isArmingDisabled() || 
+        emergencyArmingIsEnabled() || 
+        GLOBAL_FUNCTION_FLAG(GLOBAL_FUNCTION_FLAG_OVERRIDE_ARMING_SAFETY)
+    ) {
+#else 
+    if (
+        !isArmingDisabled() || 
+        emergencyArmingIsEnabled()
+    ) {
+#endif
         if (ARMING_FLAG(ARMED)) {
             return;
         }
+<<<<<<< HEAD
+=======
+
+#if defined(USE_NAV)
+        // If nav_extra_arming_safety was bypassed we always
+        // allow bypassing it even without the sticks set
+        // in the correct position to allow re-arming quickly
+        // in case of a mid-air accidental disarm.
+        bool usedBypass = false;
+        navigationIsBlockingArming(&usedBypass);
+        if (usedBypass) {
+            ENABLE_STATE(NAV_EXTRA_ARMING_SAFETY_BYPASSED);
+        }
+#endif
+
+>>>>>>> master
         lastDisarmReason = DISARM_NONE;
 
         ENABLE_ARMING_FLAG(ARMED);
         ENABLE_ARMING_FLAG(WAS_EVER_ARMED);
+        //It is required to inform the mixer that arming was executed and it has to switch to the FORWARD direction
+        ENABLE_STATE(SET_REVERSIBLE_MOTORS_FORWARD);
+        logicConditionReset();
         headFreeModeHold = DECIDEGREES_TO_DEGREES(attitude.values.yaw);
 
         resetHeadingHoldTarget(DECIDEGREES_TO_DEGREES(attitude.values.yaw));
 
+<<<<<<< HEAD
         startBlackbox();
         disarmAt = millis() + armingConfig()->auto_disarm_delay * 1000;   // start disarm timeout, will be extended when throttle is nonzero
+=======
+#ifdef USE_BLACKBOX
+        if (feature(FEATURE_BLACKBOX)) {
+            serialPort_t *sharedBlackboxAndMspPort = findSharedSerialPort(FUNCTION_BLACKBOX, FUNCTION_MSP);
+            if (sharedBlackboxAndMspPort) {
+                mspSerialReleasePortIfAllocated(sharedBlackboxAndMspPort);
+            }
+            blackboxStart();
+        }
+#endif
+>>>>>>> master
 
         //beep to indicate arming
 #ifdef USE_NAV
@@ -369,11 +495,18 @@ void tryArm(void) {
 
 void processRx(timeUs_t currentTimeUs)
 {
-    static bool armedBeeperOn = false;
-
     // Calculate RPY channel data
     calculateRxChannelsAndUpdateFailsafe(currentTimeUs);
 
+<<<<<<< HEAD
+=======
+    // in 3D mode, we need to be able to disarm by switch at any time
+    if (feature(FEATURE_REVERSIBLE_MOTORS)) {
+        if (!IS_RC_MODE_ACTIVE(BOXARM))
+            disarm(DISARM_SWITCH_3D);
+    }
+
+>>>>>>> master
     updateRSSI(currentTimeUs);
 
     // Update failsafe monitoring system
@@ -383,10 +516,28 @@ void processRx(timeUs_t currentTimeUs)
 
     failsafeUpdateState();
 
+<<<<<<< HEAD
     const throttleStatus_e throttleStatus = calculateThrottleStatus();
         
-    processRcStickPositions(throttleStatus);
+=======
+    const throttleStatus_e throttleStatus = calculateThrottleStatus(THROTTLE_STATUS_TYPE_RC);
 
+    // When armed and motors aren't spinning, do beeps periodically
+    if (ARMING_FLAG(ARMED) && feature(FEATURE_MOTOR_STOP) && !STATE(FIXED_WING_LEGACY)) {
+        static bool armedBeeperOn = false;
+
+        if (throttleStatus == THROTTLE_LOW) {
+            beeper(BEEPER_ARMED);
+            armedBeeperOn = true;
+        } else if (armedBeeperOn) {
+            beeperSilence();
+            armedBeeperOn = false;
+        }
+    }
+
+>>>>>>> master
+    processRcStickPositions(throttleStatus);
+    processAirmode();
     updateActivatedModes();
 
 #ifdef USE_PINIOBOX
@@ -474,7 +625,7 @@ void processRx(timeUs_t currentTimeUs)
 #endif
 
     // Handle passthrough mode
-    if (STATE(FIXED_WING)) {
+    if (STATE(FIXED_WING_LEGACY)) {
         if ((IS_RC_MODE_ACTIVE(BOXMANUAL) && !navigationRequiresAngleMode() && !failsafeRequiresAngleMode()) ||    // Normal activation of passthrough
             (!ARMING_FLAG(ARMED) && isCalibrating())){                                                              // Backup - if we are not armed - enforce passthrough while calibrating
             ENABLE_FLIGHT_MODE(MANUAL_MODE);
@@ -490,13 +641,13 @@ void processRx(timeUs_t currentTimeUs)
         /* In MANUAL mode we reset integrators prevent I-term wind-up (PID output is not used in MANUAL) */
         pidResetErrorAccumulators();
     }
-    else {
+    else if (STATE(FIXED_WING_LEGACY) || rcControlsConfig()->airmodeHandlingType == STICK_CENTER) {
         if (throttleStatus == THROTTLE_LOW) {
-            if (isAirmodeActive() && !failsafeIsActive() && ARMING_FLAG(ARMED)) {
+            if (STATE(AIRMODE_ACTIVE) && !failsafeIsActive() && ARMING_FLAG(ARMED)) {
                 rollPitchStatus_e rollPitchStatus = calculateRollPitchCenterStatus();
 
                 // ANTI_WINDUP at centred stick with MOTOR_STOP is needed on MRs and not needed on FWs
-                if ((rollPitchStatus == CENTERED) || (feature(FEATURE_MOTOR_STOP) && !STATE(FIXED_WING))) {
+                if ((rollPitchStatus == CENTERED) || (feature(FEATURE_MOTOR_STOP) && !STATE(FIXED_WING_LEGACY))) {
                     ENABLE_STATE(ANTI_WINDUP);
                 }
                 else {
@@ -510,6 +661,12 @@ void processRx(timeUs_t currentTimeUs)
         }
         else {
             DISABLE_STATE(ANTI_WINDUP);
+        }
+    } else if (rcControlsConfig()->airmodeHandlingType == THROTTLE_THRESHOLD) {
+        DISABLE_STATE(ANTI_WINDUP);
+        //This case applies only to MR when Airmode management is throttle threshold activated
+        if (throttleStatus == THROTTLE_LOW && !STATE(AIRMODE_ACTIVE)) {
+            pidResetErrorAccumulators();
         }
     }
 
@@ -538,7 +695,7 @@ void processRx(timeUs_t currentTimeUs)
 }
 
 // Function for loop trigger
-void taskGyro(timeUs_t currentTimeUs) {
+void FAST_CODE NOINLINE taskGyro(timeUs_t currentTimeUs) {
     // getTaskDeltaTime() returns delta time frozen at the moment of entering the scheduler. currentTime is frozen at the very same point.
     // To make busy-waiting timeout work we need to account for time spent within busy-waiting loop
     const timeDelta_t currentDeltaTime = getTaskDeltaTime(TASK_SELF);
@@ -547,16 +704,26 @@ void taskGyro(timeUs_t currentTimeUs) {
     if (gyroConfig()->gyroSync) {
         while (true) {
             gyroUpdateUs = micros();
-            if (gyroSyncCheckUpdate() || ((currentDeltaTime + cmpTimeUs(gyroUpdateUs, currentTimeUs)) >= (timeDelta_t)(getLooptime() + GYRO_WATCHDOG_DELAY))) {
+            if (gyroSyncCheckUpdate()) {
+                gyroSyncFailureCount = 0;
                 break;
             }
+            else if ((currentDeltaTime + cmpTimeUs(gyroUpdateUs, currentTimeUs)) >= (timeDelta_t)(getLooptime() + GYRO_WATCHDOG_DELAY)) {
+                gyroSyncFailureCount++;
+                break;
+            }
+        }
+
+        // If we detect gyro sync failure - disable gyro sync
+        if (gyroSyncFailureCount > GYRO_SYNC_MAX_CONSECUTIVE_FAILURES) {
+            gyroConfigMutable()->gyroSync = false;
         }
     }
 
     /* Update actual hardware readings */
     gyroUpdate();
 
-#ifdef USE_OPTICAL_FLOW
+#ifdef USE_OPFLOW
     if (sensors(SENSOR_OPFLOW)) {
         opflowGyroUpdateCallback((timeUs_t)currentDeltaTime + (gyroUpdateUs - currentTimeUs));
     }
@@ -578,12 +745,18 @@ void taskMainPidLoop(timeUs_t currentTimeUs)
     cycleTime = getTaskDeltaTime(TASK_SELF);
     dT = (float)cycleTime * 0.000001f;
 
+<<<<<<< HEAD
     if (ARMING_FLAG(ARMED)) {
         flightTime  += cycleTime;
     } else {
         if (!cliMode && STATE(GPS_FIX)) {
             tryArm();
         }
+=======
+    if (ARMING_FLAG(ARMED) && (!STATE(FIXED_WING_LEGACY) || !isNavLaunchEnabled() || (isNavLaunchEnabled() && (isFixedWingLaunchDetected() || isFixedWingLaunchFinishedOrAborted())))) {
+        flightTime += cycleTime;
+        updateAccExtremes();
+>>>>>>> master
     }
 
     taskGyro(currentTimeUs);
@@ -609,19 +782,8 @@ void taskMainPidLoop(timeUs_t currentTimeUs)
     applyWaypointNavigationAndAltitudeHold();
 #endif
 
-    // If we're armed, at minimum throttle, and we do arming via the
-    // sticks, do not process yaw input from the rx.  We do this so the
-    // motors do not spin up while we are trying to arm or disarm.
-    // Allow yaw control for tricopters if the user wants the servo to move even when unarmed.
-    if (isUsingSticksForArming() && rcData[THROTTLE] <= rxConfig()->mincheck
-            && !((mixerConfig()->platformType == PLATFORM_TRICOPTER) && servoConfig()->tri_unarmed_servo)
-            && mixerConfig()->platformType != PLATFORM_AIRPLANE
-    ) {
-        rcCommand[YAW] = 0;
-    }
-
     // Apply throttle tilt compensation
-    if (!STATE(FIXED_WING)) {
+    if (!STATE(FIXED_WING_LEGACY)) {
         int16_t thrTiltCompStrength = 0;
 
         if (navigationRequiresThrottleTiltCompensation()) {
@@ -632,9 +794,9 @@ void taskMainPidLoop(timeUs_t currentTimeUs)
         }
 
         if (thrTiltCompStrength) {
-            rcCommand[THROTTLE] = constrain(motorConfig()->minthrottle
-                                            + (rcCommand[THROTTLE] - motorConfig()->minthrottle) * calculateThrottleTiltCompensationFactor(thrTiltCompStrength),
-                                            motorConfig()->minthrottle,
+            rcCommand[THROTTLE] = constrain(getThrottleIdleValue()
+                                            + (rcCommand[THROTTLE] - getThrottleIdleValue()) * calculateThrottleTiltCompensationFactor(thrTiltCompStrength),
+                                            getThrottleIdleValue(),
                                             motorConfig()->maxthrottle);
         }
     }
@@ -643,10 +805,10 @@ void taskMainPidLoop(timeUs_t currentTimeUs)
     }
 
     // Update PID coefficients
-    updatePIDCoefficients();
+    updatePIDCoefficients(dT);
 
     // Calculate stabilisation
-    pidController();
+    pidController(dT);
 
 #ifdef HIL
     if (hilActive) {
@@ -689,7 +851,11 @@ void taskRunRealtimeCallbacks(timeUs_t currentTimeUs)
 #endif
 
 #ifdef USE_DSHOT
-    pwmCompleteDshotUpdate(getMotorCount());
+    pwmCompleteMotorUpdate();
+#endif
+
+#ifdef USE_ESC_SENSOR
+    escSensorUpdate(currentTimeUs);
 #endif
 }
 

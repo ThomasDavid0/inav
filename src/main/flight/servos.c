@@ -28,6 +28,7 @@
 #include "common/axis.h"
 #include "common/filter.h"
 #include "common/maths.h"
+#include "common/global_variables.h"
 
 #include "config/config_reset.h"
 #include "config/feature.h"
@@ -35,6 +36,7 @@
 #include "config/parameter_group_ids.h"
 
 #include "drivers/pwm_output.h"
+#include "drivers/pwm_mapping.h"
 #include "drivers/time.h"
 
 #include "fc/config.h"
@@ -52,12 +54,13 @@
 
 #include "sensors/gyro.h"
 
-PG_REGISTER_WITH_RESET_TEMPLATE(servoConfig_t, servoConfig, PG_SERVO_CONFIG, 0);
+PG_REGISTER_WITH_RESET_TEMPLATE(servoConfig_t, servoConfig, PG_SERVO_CONFIG, 1);
 
 PG_RESET_TEMPLATE(servoConfig_t, servoConfig,
     .servoCenterPulse = 1500,
     .servoPwmRate = 50,             // Default for analog servos
     .servo_lowpass_freq = 20,       // Default servo update rate is 50Hz, everything above Nyquist frequency (25Hz) is going to fold and cause distortions
+    .servo_protocol = SERVO_TYPE_PWM,
     .flaperon_throw_offset = FLAPERON_THROW_DEFAULT,
     .tri_unarmed_servo = 1
 );
@@ -144,9 +147,19 @@ void servosInit(void)
         mixerUsesServos = 1;
     }
 
-    for (uint8_t i = 0; i < MAX_SUPPORTED_SERVOS; i++)
+    for (uint8_t i = 0; i < MAX_SUPPORTED_SERVOS; i++) {
         servoComputeScalingFactors(i);
+    }
+}
 
+int getServoCount(void)
+{
+    if (servoRuleCount) {
+        return 1 + maxServoIndex - minServoIndex;
+    }
+    else {
+        return 0;
+    }
 }
 
 void loadCustomServoMixer(void)
@@ -237,13 +250,28 @@ void servoMixer(float dT)
         input[INPUT_STABILIZED_YAW] = axisPID[YAW];
 
         // Reverse yaw servo when inverted in 3D mode only for multirotor and tricopter
-        if (feature(FEATURE_3D) && (rcData[THROTTLE] < PWM_RANGE_MIDDLE) &&
+        if (feature(FEATURE_REVERSIBLE_MOTORS) && (rxGetChannelValue(THROTTLE) < PWM_RANGE_MIDDLE) &&
         (mixerConfig()->platformType == PLATFORM_MULTIROTOR || mixerConfig()->platformType == PLATFORM_TRICOPTER)) {
             input[INPUT_STABILIZED_YAW] *= -1;
         }
     }
 
+    input[INPUT_STABILIZED_ROLL_PLUS] = constrain(input[INPUT_STABILIZED_ROLL], 0, 1000);
+    input[INPUT_STABILIZED_ROLL_MINUS] = constrain(input[INPUT_STABILIZED_ROLL], -1000, 0);
+    input[INPUT_STABILIZED_PITCH_PLUS] = constrain(input[INPUT_STABILIZED_PITCH], 0, 1000);
+    input[INPUT_STABILIZED_PITCH_MINUS] = constrain(input[INPUT_STABILIZED_PITCH], -1000, 0);
+    input[INPUT_STABILIZED_YAW_PLUS] = constrain(input[INPUT_STABILIZED_YAW], 0, 1000);
+    input[INPUT_STABILIZED_YAW_MINUS] = constrain(input[INPUT_STABILIZED_YAW], -1000, 0);
+
     input[INPUT_FEATURE_FLAPS] = FLIGHT_MODE(FLAPERON) ? servoConfig()->flaperon_throw_offset : 0;
+
+    input[INPUT_MAX] = 500;
+#ifdef USE_LOGIC_CONDITIONS
+    input[INPUT_GVAR_0] = constrain(gvGet(0), -1000, 1000);
+    input[INPUT_GVAR_1] = constrain(gvGet(1), -1000, 1000);
+    input[INPUT_GVAR_2] = constrain(gvGet(2), -1000, 1000);
+    input[INPUT_GVAR_3] = constrain(gvGet(3), -1000, 1000);
+#endif
 
     if (IS_RC_MODE_ACTIVE(BOXCAMSTAB)) {
         input[INPUT_GIMBAL_PITCH] = scaleRange(attitude.values.pitch, -900, 900, -500, +500);
@@ -253,7 +281,7 @@ void servoMixer(float dT)
         input[INPUT_GIMBAL_ROLL] = 0;
     }
 
-    input[INPUT_STABILIZED_THROTTLE] = motor[0] - 1000 - 500;  // Since it derives from rcCommand or mincommand and must be [-500:+500]
+    input[INPUT_STABILIZED_THROTTLE] = mixerThrottleCommand - 1000 - 500;  // Since it derives from rcCommand or mincommand and must be [-500:+500]
 
     // center the RC input value around the RC middle value
     // by subtracting the RC middle value from the RC input value, we get:
@@ -261,22 +289,24 @@ void servoMixer(float dT)
     // 2000 - 1500 = +500
     // 1500 - 1500 = 0
     // 1000 - 1500 = -500
-    input[INPUT_RC_ROLL]     = rcData[ROLL]     - PWM_RANGE_MIDDLE;
-    input[INPUT_RC_PITCH]    = rcData[PITCH]    - PWM_RANGE_MIDDLE;
-    input[INPUT_RC_YAW]      = rcData[YAW]      - PWM_RANGE_MIDDLE;
-    input[INPUT_RC_THROTTLE] = rcData[THROTTLE] - PWM_RANGE_MIDDLE;
-    input[INPUT_RC_CH5]      = rcData[AUX1]     - PWM_RANGE_MIDDLE;
-    input[INPUT_RC_CH6]      = rcData[AUX2]     - PWM_RANGE_MIDDLE;
-    input[INPUT_RC_CH7]      = rcData[AUX3]     - PWM_RANGE_MIDDLE;
-    input[INPUT_RC_CH8]      = rcData[AUX4]     - PWM_RANGE_MIDDLE;
-    input[INPUT_RC_CH9]      = rcData[AUX5]     - PWM_RANGE_MIDDLE;
-    input[INPUT_RC_CH10]     = rcData[AUX6]     - PWM_RANGE_MIDDLE;
-    input[INPUT_RC_CH11]     = rcData[AUX7]     - PWM_RANGE_MIDDLE;
-    input[INPUT_RC_CH12]     = rcData[AUX8]     - PWM_RANGE_MIDDLE;
-    input[INPUT_RC_CH13]     = rcData[AUX9]     - PWM_RANGE_MIDDLE;
-    input[INPUT_RC_CH14]     = rcData[AUX10]    - PWM_RANGE_MIDDLE;
-    input[INPUT_RC_CH15]     = rcData[AUX11]    - PWM_RANGE_MIDDLE;
-    input[INPUT_RC_CH16]     = rcData[AUX12]    - PWM_RANGE_MIDDLE;
+#define GET_RX_CHANNEL_INPUT(x) (rxGetChannelValue(x) - PWM_RANGE_MIDDLE)
+    input[INPUT_RC_ROLL]     = GET_RX_CHANNEL_INPUT(ROLL);
+    input[INPUT_RC_PITCH]    = GET_RX_CHANNEL_INPUT(PITCH);
+    input[INPUT_RC_YAW]      = GET_RX_CHANNEL_INPUT(YAW);
+    input[INPUT_RC_THROTTLE] = GET_RX_CHANNEL_INPUT(THROTTLE);
+    input[INPUT_RC_CH5]      = GET_RX_CHANNEL_INPUT(AUX1);
+    input[INPUT_RC_CH6]      = GET_RX_CHANNEL_INPUT(AUX2);
+    input[INPUT_RC_CH7]      = GET_RX_CHANNEL_INPUT(AUX3);
+    input[INPUT_RC_CH8]      = GET_RX_CHANNEL_INPUT(AUX4);
+    input[INPUT_RC_CH9]      = GET_RX_CHANNEL_INPUT(AUX5);
+    input[INPUT_RC_CH10]     = GET_RX_CHANNEL_INPUT(AUX6);
+    input[INPUT_RC_CH11]     = GET_RX_CHANNEL_INPUT(AUX7);
+    input[INPUT_RC_CH12]     = GET_RX_CHANNEL_INPUT(AUX8);
+    input[INPUT_RC_CH13]     = GET_RX_CHANNEL_INPUT(AUX9);
+    input[INPUT_RC_CH14]     = GET_RX_CHANNEL_INPUT(AUX10);
+    input[INPUT_RC_CH15]     = GET_RX_CHANNEL_INPUT(AUX11);
+    input[INPUT_RC_CH16]     = GET_RX_CHANNEL_INPUT(AUX12);
+#undef GET_RX_CHANNEL_INPUT
 
     for (int i = 0; i < MAX_SUPPORTED_SERVOS; i++) {
         servo[i] = 0;
@@ -428,7 +458,12 @@ bool FAST_CODE NOINLINE isServoOutputEnabled(void)
     return servoOutputEnabled;
 }
 
-bool FAST_CODE NOINLINE isMixerUsingServos(void)
+void setServoOutputEnabled(bool flag)
+{
+    servoOutputEnabled = flag;
+}
+
+bool isMixerUsingServos(void)
 {
     return mixerUsesServos;
 }
