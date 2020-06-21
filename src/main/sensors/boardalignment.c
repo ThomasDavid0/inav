@@ -22,6 +22,8 @@
 
 #include "platform.h"
 
+FILE_COMPILE_FOR_SPEED
+
 #include "common/maths.h"
 #include "common/vector.h"
 #include "common/axis.h"
@@ -99,7 +101,7 @@ void applyBoardAlignment(int32_t *vec)
     vec[Z] = lrintf(fpVec.z);
 }
 
-void applySensorAlignment(int32_t * dest, int32_t * src, uint8_t rotation)
+void FAST_CODE applySensorAlignment(int32_t * dest, int32_t * src, uint8_t rotation)
 {
     // Create a copy so we could use the same buffer for src & dest
     const int32_t x = src[X];

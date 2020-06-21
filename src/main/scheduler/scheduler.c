@@ -21,6 +21,8 @@
 
 #include "platform.h"
 
+FILE_COMPILE_FOR_SPEED
+
 #include "scheduler.h"
 
 #include "build/build_config.h"
@@ -212,7 +214,7 @@ void schedulerInit(void)
     queueAdd(&cfTasks[TASK_SYSTEM]);
 }
 
-void scheduler(void)
+void FAST_CODE NOINLINE scheduler(void)
 {
     // Cache currentTime
     const timeUs_t currentTimeUs = micros();
